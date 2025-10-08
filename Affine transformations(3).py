@@ -1,338 +1,465 @@
-import matplotlib.pyplot as plt
+import tkinter as tk
 import numpy as np
 
-class PointClassifier:
-    def __init__(self):
-        self.fig, self.ax = plt.subplots(figsize=(10, 8))
-        self.edge_a = None
-        self.edge_b = None
-        self.points = []
-        self.results = []
-        self.setup_plot()
+class PolygonDrawer:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Polygon Drawer")
+
+        self.canvas = tk.Canvas(self.root, bg='white', width=800, height=600)
+        self.canvas.pack()
+
+#1
+        self.polygons = []
+        self.current_polygon = []
+
+        self.temp_point = None  
+        self.intersection_points = []  
+        self.selected_edge = None  
+        self.edge_position_info = "" 
+
+        control_frame = tk.Frame(self.root)
+        control_frame.pack()
+
+        clear_button = tk.Button(control_frame, text="Очистить", command=self.clear_scene)
+        clear_button.grid(row=0, column=0, padx=5, pady=5)
+
+        finish_polygon_button = tk.Button(control_frame, text="Завершить полигон", command=self.finish_polygon)
+        finish_polygon_button.grid(row=0, column=1, padx=5, pady=5)
+
+        select_edge_button = tk.Button(control_frame, text="Выбрать ребро", command=self.enable_edge_selection)
+        select_edge_button.grid(row=0, column=2, padx=5, pady=5)
+
+        transform_frame = tk.Frame(self.root)
+        transform_frame.pack()
+
+        tk.Label(transform_frame, text="dx:").grid(row=0, column=0)
+        self.dx_entry = tk.Entry(transform_frame, width=5)
+        self.dx_entry.grid(row=0, column=1)
         
-    def setup_plot(self):
-        """Настраивает график"""
-        self.ax.grid(True, alpha=0.3)
-        self.ax.set_xlabel('X')
-        self.ax.set_ylabel('Y')
-        self.ax.set_title('Классификация точек относительно ребра', fontsize=14)
-        self.ax.axis('equal')
+        tk.Label(transform_frame, text="dy:").grid(row=0, column=2)
+        self.dy_entry = tk.Entry(transform_frame, width=5)
+        self.dy_entry.grid(row=0, column=3)
         
-    def classify_point_relative_to_edge(self, a, b, p):
-        """
-        Классифицирует положение точки p относительно ребра ab.
-        """
-        # Вычисляем векторное произведение
-        cross_product = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+        offset_button = tk.Button(transform_frame, text="Смещение", command=self.apply_offset)
+        offset_button.grid(row=0, column=4, padx=5)
+
+        tk.Label(transform_frame, text="Центр X:").grid(row=1, column=0)
+        self.center_x_entry = tk.Entry(transform_frame, width=5)
+        self.center_x_entry.grid(row=1, column=1)
         
-        if cross_product > 0:
-            return "left", cross_product
-        elif cross_product < 0:
-            return "right", cross_product
+        tk.Label(transform_frame, text="Центр Y:").grid(row=1, column=2)
+        self.center_y_entry = tk.Entry(transform_frame, width=5)
+        self.center_y_entry.grid(row=1, column=3)
+        
+        tk.Label(transform_frame, text="Угол:").grid(row=1, column=4)
+        self.degrees_entry = tk.Entry(transform_frame, width=5)
+        self.degrees_entry.grid(row=1, column=5)
+        
+        rotate_button = tk.Button(transform_frame, text="Поворот вокруг точки", command=self.apply_rotation)
+        rotate_button.grid(row=1, column=6, padx=5)
+        
+        rotate_own_center_button = tk.Button(transform_frame, text="Поворот вокруг центра", command=self.apply_rotation_own_center)
+        rotate_own_center_button.grid(row=1, column=7, padx=5)
+
+        tk.Label(transform_frame, text="Масштаб:").grid(row=2, column=0)
+        self.scale_factor_entry = tk.Entry(transform_frame, width=5)
+        self.scale_factor_entry.grid(row=2, column=1)
+        
+        scale_button = tk.Button(transform_frame, text="Масштабирование от точки", command=self.apply_scaling)
+        scale_button.grid(row=2, column=2, padx=5)
+        
+        scale_own_center_button = tk.Button(transform_frame, text="Масштабирование от центра", command=self.apply_scaling_own_center)
+        scale_own_center_button.grid(row=2, column=3, padx=5)
+
+        self.info_label = tk.Label(self.root, text="Создайте полигон: кликните для добавления точек")
+        self.info_label.pack()
+
+        self.mode = "draw" 
+        self.canvas.bind("<Button-1>", self.canvas_click)
+        self.canvas.bind("<Motion>", self.canvas_motion)
+
+    def enable_edge_selection(self):
+        self.mode = "select_edge"
+        self.selected_edge = None
+        self.info_label.config(text="Выберите ребро: кликните на отрезок")
+
+    def canvas_click(self, event):
+        if self.mode == "draw":
+            self.add_point(event)
+        elif self.mode == "select_edge":
+            self.select_edge(event)
+
+    def select_edge(self, event):
+        click_point = (event.x, event.y)
+        min_distance = float('inf')
+        closest_edge = None
+        
+        for polygon in self.polygons:
+            for i in range(len(polygon)):
+                if i == len(polygon) - 1:
+                    if len(polygon) > 2:
+                        edge = (polygon[i], polygon[0])
+                    else:
+                        continue
+                else:
+                    edge = (polygon[i], polygon[i+1])
+                
+                distance = self.point_to_edge_distance(click_point, edge)
+                if distance < min_distance and distance < 10:  
+                    min_distance = distance
+                    closest_edge = edge
+        
+        if closest_edge:
+            self.selected_edge = closest_edge
+            self.mode = "draw"
+            self.info_label.config(text=f"Выбрано ребро: {closest_edge[0]} - {closest_edge[1]}. Двигайте мышью для анализа.")
         else:
-            return "on_line", cross_product
-    
-    def set_edge(self, a, b):
-        """Устанавливает ребро для классификации"""
-        self.edge_a = a
-        self.edge_b = b
-        self.points = []
-        self.results = []
-        self.draw_edge()
-    
-    def draw_edge(self):
-        """Рисует ребро на графике"""
-        self.ax.clear()
-        self.setup_plot()
+            self.info_label.config(text="Ребро не найдено. Попробуйте еще раз.")
+
+    def point_to_edge_distance(self, point, edge):
+        p1, p2 = edge
+        x, y = point
+
+        edge_vec = (p2[0] - p1[0], p2[1] - p1[1])
+        point_vec = (x - p1[0], y - p1[1])
         
-        # Рисуем ребро
-        self.ax.plot([self.edge_a[0], self.edge_b[0]], [self.edge_a[1], self.edge_b[1]], 
-                    'b-', linewidth=3, label='Ребро')
-        self.ax.plot([self.edge_a[0], self.edge_b[0]], [self.edge_a[1], self.edge_b[1]], 
-                    'bo', markersize=8, label='Концы ребра')
+        edge_len_sq = edge_vec[0]**2 + edge_vec[1]**2
         
-        # Добавляем стрелку направления ребра
-        dx = self.edge_b[0] - self.edge_a[0]
-        dy = self.edge_b[1] - self.edge_a[1]
-        self.ax.arrow(self.edge_a[0] + dx*0.1, self.edge_a[1] + dy*0.1, 
-                     dx*0.8, dy*0.8, head_width=0.1, head_length=0.1, 
-                     fc='blue', ec='blue', alpha=0.7)
+        if edge_len_sq == 0:
+            return np.sqrt(point_vec[0]**2 + point_vec[1]**2)
         
-        # Перерисовываем все точки, если они есть
-        for i, (point, result) in enumerate(zip(self.points, self.results)):
-            self.draw_point(point, result, i)
+        t = max(0, min(1, (point_vec[0]*edge_vec[0] + point_vec[1]*edge_vec[1]) / edge_len_sq))
         
-        self.ax.legend(loc='upper right')
-    
-    def draw_point(self, point, result, index):
-        """Рисует точку на графике с соответствующим цветом"""
-        if result[0] == "left":
-            color = 'green'
-            marker = '^'
-            label = 'Слева' if index == 0 else ""
-        elif result[0] == "right":
-            color = 'red'
-            marker = 'v'
-            label = 'Справа' if index == 0 else ""
-        else:
-            color = 'orange'
-            marker = 's'
-            label = 'На прямой' if index == 0 else ""
+        closest_point = (
+            p1[0] + t * edge_vec[0],
+            p1[1] + t * edge_vec[1]
+        )
         
-        self.ax.plot(point[0], point[1], marker, color=color, markersize=10, label=label)
-        
-        # Добавляем номер точки
-        self.ax.text(point[0] + 0.05, point[1] + 0.05, str(index+1), 
-                    fontsize=10, color=color, weight='bold')
-    
-    def add_point(self, point):
-        """Добавляет точку и обновляет визуализацию"""
-        if self.edge_a is None or self.edge_b is None:
-            print("Сначала задайте ребро!")
+        return np.sqrt((x - closest_point[0])**2 + (y - closest_point[1])**2)
+
+    def canvas_motion(self, event):
+        self.temp_point = (event.x, event.y)
+        self.update_dynamic_info()
+        self.draw_scene()
+#1!
+
+#2
+    def update_dynamic_info(self):
+        if not self.temp_point:
             return
+            
+        x, y = self.temp_point
+        info_text = f"Текущая позиция: ({x}, {y})"
+        if self.selected_edge:
+            position = self.classify_point_relative_to_edge((x, y), self.selected_edge)
+            info_text += f" | Относительно ребра: {position}"
         
-        result = self.classify_point_relative_to_edge(self.edge_a, self.edge_b, point)
-        self.points.append(point)
-        self.results.append(result)
+        point_check_results = []
+        for i, polygon in enumerate(self.polygons):
+            if len(polygon) >= 3: 
+                is_inside = self.is_point_in_polygon(x, y, polygon)
+                polygon_type = "выпуклый" if self.is_convex(polygon) else "невыпуклый"
+                status = "внутри" if is_inside else "снаружи"
+                point_check_results.append(f"П{i+1}({polygon_type}):{status}")
         
-        # Перерисовываем график с новой точкой
-        self.draw_edge()
+        if point_check_results:
+            info_text += " | " + ", ".join(point_check_results)
         
-        # Выводим информацию о точке
-        print(f"Точка {len(self.points)}: {point} → {result[0]} (векторное произведение: {result[1]:.2f})")
+        if len(self.current_polygon) >= 1:
+            if len(self.current_polygon) >= 2:
+                last_edge = (self.current_polygon[-2], self.current_polygon[-1])
+                temp_edge = (self.current_polygon[-1], self.temp_point)
+            else:
+                temp_edge = (self.current_polygon[-1], self.temp_point)
+            
+            intersection_info = self.find_intersections_with_edge(temp_edge)
+            if intersection_info:
+                info_text += f" | Пересечения: {len(intersection_info)}"
+        
+        self.info_label.config(text=info_text)
+#2!
+
+#3
+    def classify_point_relative_to_edge(self, point, edge):
+        p1, p2 = edge
+        x, y = point
+
+        edge_vec = (p2[0] - p1[0], p2[1] - p1[1])
+        point_vec = (x - p1[0], y - p1[1])
     
-    def show_statistics(self):
-        """Показывает статистику по всем точкам"""
-        if not self.points:
-            print("Нет точек для анализа")
+        cross_product = edge_vec[0] * point_vec[1] - edge_vec[1] * point_vec[0]
+
+        if cross_product > 0:
+            return "слева"
+        else:
+            return "справа"
+#3!
+
+#1
+    def add_point(self, event):
+        self.current_polygon.append((event.x, event.y))
+        self.draw_scene()
+
+    def finish_polygon(self):
+        if len(self.current_polygon) > 0:
+            self.polygons.append(self.current_polygon.copy())
+            self.current_polygon = []
+            self.draw_scene()
+
+    def draw_scene(self):
+        self.canvas.delete("all")
+        
+        for i, polygon in enumerate(self.polygons):
+            color = 'blue' if self.is_convex(polygon) else 'red'
+            if len(polygon) == 1:
+                x, y = polygon[0]
+                self.canvas.create_oval(x-3, y-3, x+3, y+3, fill=color, outline=color)
+            elif len(polygon) == 2:
+                self.canvas.create_line(polygon[0], polygon[1], fill=color, width=2)
+            else:
+                self.canvas.create_polygon(polygon, outline=color, fill='', width=2)
+
+            for point in polygon:
+                x, y = point
+                self.canvas.create_oval(x-3, y-3, x+3, y+3, fill=color, outline=color)
+
+        if self.selected_edge:
+            p1, p2 = self.selected_edge
+            self.canvas.create_line(p1[0], p1[1], p2[0], p2[1], 
+                                  fill='orange', width=4, arrow=tk.BOTH)
+
+        if self.current_polygon:
+            current_color = 'green'
+
+            if len(self.current_polygon) == 1:
+                x, y = self.current_polygon[0]
+                self.canvas.create_oval(x-3, y-3, x+3, y+3, fill=current_color, outline=current_color)
+            elif len(self.current_polygon) == 2:
+                self.canvas.create_line(self.current_polygon[0], self.current_polygon[1], fill=current_color, width=2)
+            else:
+                self.canvas.create_polygon(self.current_polygon, outline=current_color, fill='', width=2)
+            
+            for point in self.current_polygon:
+                x, y = point
+                self.canvas.create_oval(x-3, y-3, x+3, y+3, fill=current_color, outline=current_color)
+
+            if self.current_polygon and self.temp_point:
+                last_point = self.current_polygon[-1]
+                self.canvas.create_line(last_point[0], last_point[1], 
+                                      self.temp_point[0], self.temp_point[1], 
+                                      fill=current_color, width=2, dash=(4, 2))
+
+                if len(self.current_polygon) >= 1:
+                    temp_edge = (last_point, self.temp_point)
+                    intersections = self.find_intersections_with_edge(temp_edge)
+                    for x, y in intersections:
+                        self.canvas.create_oval(x-5, y-5, x+5, y+5, fill='orange', outline='black')
+
+        for x, y in self.intersection_points:
+            self.canvas.create_oval(x-4, y-4, x+4, y+4, fill='purple', outline='black')
+
+        if self.temp_point:
+            x, y = self.temp_point
+            self.canvas.create_oval(x-2, y-2, x+2, y+2, fill='yellow', outline='black')
+#1!
+          
+#2
+    def find_intersections_with_edge(self, edge):
+        intersections = []
+        p1, p2 = edge
+
+        all_edges = []
+        for polygon in self.polygons:
+            for i in range(len(polygon)):
+                if i == len(polygon) - 1:
+                    if len(polygon) > 2:  
+                        all_edges.append((polygon[i], polygon[0]))
+                else:
+                    all_edges.append((polygon[i], polygon[i+1]))
+        
+        for other_edge in all_edges:
+            p3, p4 = other_edge
+            intersection = self.find_intersection(p1, p2, p3, p4)
+            if intersection:
+                intersections.append(intersection)
+        
+        return intersections
+#2!
+
+#1
+    def clear_scene(self):
+        self.polygons.clear()
+        self.current_polygon.clear()
+        self.temp_point = None
+        self.intersection_points.clear()
+        self.selected_edge = None
+        self.mode = "draw"
+        self.info_label.config(text="Создайте полигон: кликните для добавления точек")
+        self.draw_scene()
+#1!
+
+#2
+    def is_point_in_polygon(self, x, y, polygon):
+        if len(polygon) < 3:
+            return False
+            
+        n = len(polygon)
+        inside = False
+        
+        p1x, p1y = polygon[0]
+        for i in range(1, n + 1):
+            p2x, p2y = polygon[i % n]
+            if y > min(p1y, p2y):
+                if y <= max(p1y, p2y):
+                    if x <= max(p1x, p2x):
+                        if p1y != p2y:
+                            xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                        if p1x == p2x or x <= xinters:
+                            inside = not inside
+            p1x, p1y = p2x, p2y
+            
+        return inside
+
+    def is_convex(self, polygon):
+        if len(polygon) < 3:
+            return True
+            
+        n = len(polygon)
+        if n == 3:
+            return True
+            
+        sign = None
+        for i in range(n):
+            dx1 = polygon[(i+2)%n][0] - polygon[(i+1)%n][0]
+            dy1 = polygon[(i+2)%n][1] - polygon[(i+1)%n][1]
+            dx2 = polygon[i][0] - polygon[(i+1)%n][0]
+            dy2 = polygon[i][1] - polygon[(i+1)%n][1]
+            
+            cross = dx1 * dy2 - dy1 * dx2
+            
+            if cross != 0:
+                if sign is None:
+                    sign = cross > 0
+                elif (cross > 0) != sign:
+                    return False
+                    
+        return True
+
+    def find_intersection(self, p1, p2, p3, p4):
+        x1, y1 = p1
+        x2, y2 = p2
+        x3, y3 = p3
+        x4, y4 = p4
+        
+        denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1)
+        if abs(denom) < 1e-10:
+            return None 
+            
+        ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom
+        ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom
+        
+        if 0 <= ua <= 1 and 0 <= ub <= 1:
+            x = x1 + ua * (x2 - x1)
+            y = y1 + ua * (y2 - y1)
+            return (x, y)
+            
+        return None
+#2!
+
+#1
+    def apply_offset(self):
+        if not self.polygons:
             return
             
-        left_count = sum(1 for r in self.results if r[0] == "left")
-        right_count = sum(1 for r in self.results if r[0] == "right")
-        online_count = sum(1 for r in self.results if r[0] == "on_line")
+        dx = int(self.dx_entry.get() or 0)
+        dy = int(self.dy_entry.get() or 0)
         
-        print("\n" + "="*50)
-        print("СТАТИСТИКА:")
-        print(f"Всего точек: {len(self.points)}")
-        print(f"Слева от ребра: {left_count}")
-        print(f"Справа от ребра: {right_count}")
-        print(f"На прямой: {online_count}")
-        print("="*50)
-    
-    def display(self):
-        """Отображает график"""
-        plt.draw()
-        plt.pause(0.01)  # Короткая пауза для обновления графика
+        for i in range(len(self.polygons)):
+            self.polygons[i] = self.affine_transform(np.array(self.polygons[i]), 
+                                                   self.get_translation_matrix(dx, dy))
+        self.draw_scene()
 
-def interactive_demo():
-    """Интерактивная демонстрация с возможностью добавления точек"""
-    print("=== ИНТЕРАКТИВНАЯ КЛАССИФИКАЦИЯ ТОЧЕК ОТНОСИТЕЛЬНО РЕБРА ===")
-    
-    # Включаем интерактивный режим ДО создания графиков
-    plt.ion()
-    
-    # Создаем классификатор
-    classifier = PointClassifier()
-    
-    # Задаем ребро
-    print("\nЗадайте координаты ребра AB:")
-    ax = float(input("A_x: "))
-    ay = float(input("A_y: "))
-    bx = float(input("B_x: "))
-    by = float(input("B_y: "))
-    
-    classifier.set_edge((ax, ay), (bx, by))
-    classifier.display()
-    
-    # Основной цикл добавления точек
-    while True:
-        print("\n" + "-"*30)
-        print("Выберите действие:")
-        print("1 - Добавить точку")
-        print("2 - Показать статистику")
-        print("3 - Задать новое ребро")
-        print("0 - Выход")
+    def apply_rotation(self):
+        if not self.polygons:
+            return
+            
+        center_x = int(self.center_x_entry.get() or 0)
+        center_y = int(self.center_y_entry.get() or 0)
+        degrees = int(self.degrees_entry.get() or 0)
         
-        choice = input("Ваш выбор: ").strip()
-        
-        if choice == "1":
-            print("\nВведите координаты точки:")
-            try:
-                px = float(input("P_x: "))
-                py = float(input("P_y: "))
-                classifier.add_point((px, py))
-                classifier.display()
-            except ValueError:
-                print("Ошибка: введите числовые значения!")
-                
-        elif choice == "2":
-            classifier.show_statistics()
-            
-        elif choice == "3":
-            print("\nЗадайте новые координаты ребра AB:")
-            ax = float(input("A_x: "))
-            ay = float(input("A_y: "))
-            bx = float(input("B_x: "))
-            by = float(input("B_y: "))
-            classifier.set_edge((ax, ay), (bx, by))
-            classifier.display()
-            
-        elif choice == "0":
-            print("Выход из программы.")
-            plt.close('all')  # Закрываем все графики
-            break
-            
-        else:
-            print("Неверный выбор, попробуйте снова.")
+        for i in range(len(self.polygons)):
+            self.polygons[i] = self.affine_transform(np.array(self.polygons[i]), 
+                                                   self.get_rotation_matrix(center_x, center_y, degrees))
+        self.draw_scene()
 
-def demo_with_example():
-    """Демонстрация с заранее заданным примером"""
-    plt.ion()  # Включаем интерактивный режим
-    
-    classifier = PointClassifier()
-    
-    # Задаем пример ребра
-    classifier.set_edge((0, 0), (3, 2))
-    classifier.display()
-    
-    # Добавляем несколько точек для демонстрации
-    demo_points = [
-        (1, 2),   # слева
-        (2, 1),   # справа
-        (1.5, 1), # на прямой
-        (0, 1),   # слева
-        (3, 0),   # справа
-    ]
-    
-    print("Демонстрация: добавляем точки к ребру (0,0)→(3,2)")
-    for i, point in enumerate(demo_points):
-        print(f"Добавляем точку {i+1}: {point}")
-        classifier.add_point(point)
-        classifier.display()
-        plt.pause(1)  # Пауза для наглядности
-    
-    classifier.show_statistics()
-    
-    # Ждем закрытия окна
-    print("\nНажмите Enter в консоли для завершения...")
-    input()
-    plt.close('all')
+    def apply_rotation_own_center(self):
+        if not self.polygons:
+            return
+            
+        degrees = int(self.degrees_entry.get() or 0)
+        
+        for i in range(len(self.polygons)):
+            polygon = np.array(self.polygons[i])
+            center = np.mean(polygon, axis=0)
+            center_x, center_y = center[0], center[1]
+            
+            self.polygons[i] = self.affine_transform(polygon, 
+                                                   self.get_rotation_matrix(center_x, center_y, degrees))
+        self.draw_scene()
 
-def simple_interactive():
-    """Упрощенная интерактивная версия без сложного управления графиком"""
-    print("=== ПРОСТАЯ ИНТЕРАКТИВНАЯ КЛАССИФИКАЦИЯ ===")
-    
-    # Задаем ребро
-    print("\nЗадайте координаты ребра AB:")
-    ax = float(input("A_x: "))
-    ay = float(input("A_y: "))
-    bx = float(input("B_x: "))
-    by = float(input("B_y: "))
-    
-    a = (ax, ay)
-    b = (bx, by)
-    
-    points = []
-    results = []
-    
-    def classify_point(a, b, p):
-        cross_product = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
-        if cross_product > 0:
-            return "left", cross_product
-        elif cross_product < 0:
-            return "right", cross_product
-        else:
-            return "on_line", cross_product
-    
-    def visualize_all(a, b, points, results):
-        plt.figure(figsize=(10, 8))
-        
-        # Рисуем ребро
-        plt.plot([a[0], b[0]], [a[1], b[1]], 'b-', linewidth=3, label='Ребро')
-        plt.plot([a[0], b[0]], [a[1], b[1]], 'bo', markersize=8, label='Концы ребра')
-        
-        # Рисуем все точки
-        for i, (point, result) in enumerate(zip(points, results)):
-            if result[0] == "left":
-                color = 'green'
-                marker = '^'
-            elif result[0] == "right":
-                color = 'red'
-                marker = 'v'
-            else:
-                color = 'orange'
-                marker = 's'
+    def apply_scaling(self):
+        if not self.polygons:
+            return
             
-            plt.plot(point[0], point[1], marker, color=color, markersize=10)
-            plt.text(point[0] + 0.05, point[1] + 0.05, str(i+1), 
-                    fontsize=10, color=color, weight='bold')
+        scale_factor = float(self.scale_factor_entry.get() or 1.0)
+        center_x = int(self.center_x_entry.get() or 0)
+        center_y = int(self.center_y_entry.get() or 0)
         
-        plt.grid(True, alpha=0.3)
-        plt.axis('equal')
-        plt.xlabel('X')
-        plt.ylabel('Y')
-        plt.title('Классификация точек относительно ребра', fontsize=14)
-        plt.legend()
-        plt.show()
+        for i in range(len(self.polygons)):
+            self.polygons[i] = self.affine_transform(np.array(self.polygons[i]), 
+                                                   self.get_scaling_matrix(center_x, center_y, scale_factor))
+        self.draw_scene()
     
-    while True:
-        print("\n" + "-"*30)
-        print("Выберите действие:")
-        print("1 - Добавить точку")
-        print("2 - Показать статистику и визуализацию")
-        print("0 - Выход")
-        
-        choice = input("Ваш выбор: ").strip()
-        
-        if choice == "1":
-            print("\nВведите координаты точки:")
-            try:
-                px = float(input("P_x: "))
-                py = float(input("P_y: "))
-                p = (px, py)
-                result = classify_point(a, b, p)
-                points.append(p)
-                results.append(result)
-                print(f"Точка {len(points)}: {p} → {result[0]} (векторное произведение: {result[1]:.2f})")
-            except ValueError:
-                print("Ошибка: введите числовые значения!")
-                
-        elif choice == "2":
-            if not points:
-                print("Нет точек для анализа")
-            else:
-                left_count = sum(1 for r in results if r[0] == "left")
-                right_count = sum(1 for r in results if r[0] == "right")
-                online_count = sum(1 for r in results if r[0] == "on_line")
-                
-                print("\n" + "="*50)
-                print("СТАТИСТИКА:")
-                print(f"Всего точек: {len(points)}")
-                print(f"Слева от ребра: {left_count}")
-                print(f"Справа от ребра: {right_count}")
-                print(f"На прямой: {online_count}")
-                print("="*50)
-                
-                visualize_all(a, b, points, results)
+    def apply_scaling_own_center(self):
+        if not self.polygons:
+            return
             
-        elif choice == "0":
-            print("Выход из программы.")
-            break
+        scale_factor = float(self.scale_factor_entry.get() or 1.0)
+        
+        for i in range(len(self.polygons)):
+            polygon = np.array(self.polygons[i])
+            center = np.mean(polygon, axis=0)
+            center_x, center_y = center[0], center[1]
             
-        else:
-            print("Неверный выбор, попробуйте снова.")
+            self.polygons[i] = self.affine_transform(polygon, 
+                                                   self.get_scaling_matrix(center_x, center_y, scale_factor))
+        self.draw_scene()
+
+    def affine_transform(self, points, transformation_matrix):     
+        points_homogeneous = np.hstack((points, np.ones((points.shape[0], 1))))
+        points_transformed = np.dot(transformation_matrix, points_homogeneous.T).T
+        return points_transformed[:, :2].astype(int).tolist()
+
+    def get_translation_matrix(self, dx, dy):
+        return np.array([[1, 0, dx],
+                         [0, 1, dy],
+                         [0, 0, 1]])
+
+    def get_rotation_matrix(self, center_x, center_y, angle):
+        angle_rad = np.radians(angle)
+        cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+        return np.array([[cos_a, -sin_a, center_x - center_x * cos_a + center_y * sin_a],
+                         [sin_a, cos_a, center_y - center_x * sin_a - center_y * cos_a],
+                         [0, 0, 1]])
+
+    def get_scaling_matrix(self, center_x, center_y, scale_factor):
+        return np.array([[scale_factor, 0, center_x * (1 - scale_factor)],
+                         [0, scale_factor, center_y * (1 - scale_factor)],
+                         [0, 0, 1]])
+#1!
 
 if __name__ == "__main__":
-    print("Выберите режим:")
-    print("1 - Полная интерактивная демонстрация")
-    print("2 - Демонстрационный пример")
-    print("3 - Простая интерактивная версия")
-    
-    choice = input("Ваш выбор (1/2/3): ").strip()
-    
-    if choice == "1":
-        interactive_demo()
-    elif choice == "2":
-        demo_with_example()
-    else:
-        simple_interactive()
+    root = tk.Tk()
+    app = PolygonDrawer(root)
+    root.mainloop()
